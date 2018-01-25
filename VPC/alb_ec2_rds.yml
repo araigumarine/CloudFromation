@@ -1,0 +1,485 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Environment Template.
+
+######################################
+# Parameters Settings
+######################################
+Parameters:
+  # SSH用キーペアの指定
+  KeyPair:
+    Description: 'Name of an existing EC2 KeyPair to enable SSH access to the instances.'
+    Type: AWS::EC2::KeyPair::KeyName
+  EnvironmentName:
+    Description: 'Please define Name as Environment identifier.'
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9._-]*'
+    ConstraintDescription: 'Please define name as system identifier.'
+
+######################################
+# Conditions Settings
+######################################
+
+######################################
+# Mappings Settings
+######################################
+Mappings:
+  RegionMap:
+    ap-northeast-1:
+      AvailabilityZoneA: 'ap-northeast-1a'
+      AvailabilityZoneC: 'ap-northeast-1c'
+      CertificateManager: 'arn:aws:acm:ap-northeast-1:xxxxxxxxxxxx:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxxx'
+      AMI: 'ami-xxxxxxxx'
+      InstanceType: 't2.micro'
+  StackConfig:
+    VPC:
+      CIDR: '10.0.0.0/16'
+    FrontSubnet:
+      CIDR: '10.0.5.0/24'
+    ApplicationSubnetA:
+      CIDR: '10.0.10.0/24'
+    ApplicationSubnetB:
+      CIDR: '10.0.15.0/24'
+    DatastoreSubnetA:
+      CIDR: '10.0.20.0/24'
+    DatastoreSubnetB:
+      CIDR: '10.0.25.0/24'
+    Domain:
+      ValidationDomain: 'xxxxxxxxxxxxxx.com'
+      HostedZoneId: 'xxxxxxxxxxxxxx'
+    RDS:
+      InstanceType: db.t2.micro
+      PreferredBackupWindow: 04:00-06:00
+      BackupRetentionPeriod: 30
+      AllocatedStorage: 20
+      PubliclyAccessible: true
+      MultiAZ: false
+      StorageEncrypted: false
+      AutoMinorVersionUpgrade: false
+      # Engine: postgres
+      # EngineVersion: 9.5.4
+    IPs:
+      FromIpAddress: xxx.xxx.xxx.xxx/32
+    Protocol:
+      PostgreSQL: 5432
+
+######################################
+# Resources Settings
+######################################
+Resources:
+  ######################################
+  # Network
+  ######################################
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap [ StackConfig, VPC, CIDR ]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: 'Name'
+          Value: !Ref EnvironmentName
+  FrontSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !FindInMap [ RegionMap, !Ref 'AWS::Region', AvailabilityZoneA ]
+      CidrBlock: !FindInMap [ StackConfig, FrontSubnet, CIDR ]
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ front-subnet, !Ref EnvironmentName ] ]
+  ApplicationSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !FindInMap [ RegionMap, !Ref 'AWS::Region', AvailabilityZoneA ]
+      CidrBlock: !FindInMap [ StackConfig, ApplicationSubnetA, CIDR ]
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ application-subnet, !Ref EnvironmentName ] ]
+  ApplicationSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !FindInMap [ RegionMap, !Ref 'AWS::Region', AvailabilityZoneC ]
+      CidrBlock: !FindInMap [ StackConfig, ApplicationSubnetB, CIDR ]
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ application-subnet, !Ref EnvironmentName ] ]
+  DatastoreSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !FindInMap [ RegionMap, !Ref 'AWS::Region', AvailabilityZoneA ]
+      CidrBlock: !FindInMap [ StackConfig, DatastoreSubnetA, CIDR ]
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ datastore-subnet-a, !Ref EnvironmentName ] ]
+  DatastoreSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !FindInMap [ RegionMap, !Ref 'AWS::Region', AvailabilityZoneC ]
+      CidrBlock: !FindInMap [ StackConfig, DatastoreSubnetB, CIDR ]
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ datastore-subnet-c, !Ref EnvironmentName ] ]
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: 'Name'
+          Value: !Ref EnvironmentName
+  # igwをvpcにアタッチ
+  AttacheInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+  FrontSubnetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ front-table, !Ref EnvironmentName ] ]
+  ApplicationSubnetARouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ application-table-a, !Ref EnvironmentName ] ]
+  ApplicationSubnetBRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ application-table-b, !Ref EnvironmentName ] ]
+  DatastoreSubnetARouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ datastore-table-a, !Ref EnvironmentName ] ]
+  DatastoreSubnetBRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ datastore-table-b, !Ref EnvironmentName ] ]
+  # Front Subnet Route Tableを編集
+  ChangeFrontSubnetRouteTable:
+    Type: AWS::EC2::Route
+    # AttacheInternetGateway 実行後に設定する
+    DependsOn: 'AttacheInternetGateway'
+    Properties:
+      RouteTableId: !Ref FrontSubnetRouteTable
+      # デフォルトゲートウェイ指定
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  # Application Subnet Route Tableを編集
+  ChangeApplicationSubnetARouteTable:
+    Type: AWS::EC2::Route
+    # AttacheInternetGateway 実行後に設定する
+    DependsOn: 'AttacheInternetGateway'
+    Properties:
+      RouteTableId: !Ref ApplicationSubnetARouteTable
+      # デフォルトゲートウェイ指定
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  ChangeApplicationSubnetBRouteTable:
+    Type: AWS::EC2::Route
+    # AttacheInternetGateway 実行後に設定する
+    DependsOn: 'AttacheInternetGateway'
+    Properties:
+      RouteTableId: !Ref ApplicationSubnetBRouteTable
+      # デフォルトゲートウェイ指定
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  FrontSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref FrontSubnetRouteTable
+      SubnetId: !Ref FrontSubnet
+  # Application subnet に Route tableを紐づける
+  ApplicationSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ApplicationSubnetARouteTable
+      SubnetId: !Ref ApplicationSubnetA
+  ApplicationSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ApplicationSubnetBRouteTable
+      SubnetId: !Ref ApplicationSubnetB
+  # Datastore subnet に Route tableを紐づける
+  DatastoreSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref DatastoreSubnetARouteTable
+      SubnetId: !Ref DatastoreSubnetA
+  DatastoreSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref DatastoreSubnetBRouteTable
+      SubnetId: !Ref DatastoreSubnetB
+  # DNS Setting
+  ApplicationLoadBalancerDNSRecord:
+    Type: AWS::Route53::RecordSetGroup
+    DependsOn: ApplicationLoadBalancer
+    Properties:
+      # HostedZoneName: !Join [ '', [ !FindInMap [ StackConfig, Domain, ValidationDomain ], '.' ] ]
+      HostedZoneId: !FindInMap [ StackConfig, Domain, HostedZoneId ]
+      RecordSets:
+      - Name: !Join [ '', [ !Ref EnvironmentName, ., !FindInMap [ StackConfig, Domain, ValidationDomain ], . ] ]
+        Type: A
+        AliasTarget:
+          HostedZoneId: !GetAtt ApplicationLoadBalancer.CanonicalHostedZoneID
+          DNSName: !GetAtt ApplicationLoadBalancer.DNSName
+
+  ######################################
+  # SecurityGroup
+  ######################################
+  FrontSubnetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Front subnet Security Group.'
+      GroupName: !Join [ '-', [ !Ref EnvironmentName, front ] ]
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !FindInMap [ StackConfig, IPs, FromIpAddress ]
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ sg-front, !Ref EnvironmentName ] ]
+  ApplicationSubnetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Application subnet Security Group.'
+      GroupName: !Join [ '-', [ !Ref EnvironmentName, application ] ]
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !GetAtt FrontSubnetSecurityGroup.GroupId
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !FindInMap [ StackConfig, IPs, FromIpAddress ]
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ sg-application, !Ref EnvironmentName ] ]
+  DatastoreSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Datastore subnet Security Group.
+      GroupName: !Join [ '-', [ !Ref EnvironmentName, datastore ] ]
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          SourceSecurityGroupId: !GetAtt ApplicationSubnetSecurityGroup.GroupId
+          FromPort: !FindInMap [ StackConfig, Protocol, PostgreSQL ]
+          ToPort: !FindInMap [ StackConfig, Protocol, PostgreSQL ]
+      Tags:
+        - Key: Name
+          Value: !Join [ '-', [ sg-datastore, !Ref EnvironmentName ] ]
+
+  ######################################
+  # Application Load Balancer
+  ######################################
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      LoadBalancerAttributes:
+        - Key: access_logs.s3.enabled
+          Value: true
+        - Key: access_logs.s3.bucket
+          Value: alb-log-by-environment
+        - Key: deletion_protection.enabled
+          Value: true
+        - Key: idle_timeout.timeout_seconds
+          Value: 60
+      Name: !Join [ '-', [ alb, !Ref EnvironmentName ] ]
+      Scheme: internet-facing
+      SecurityGroups:
+        - Ref: FrontSubnetSecurityGroup
+      Subnets: # availavility zone の指定
+        - Ref: ApplicationSubnetA
+        - Ref: ApplicationSubnetB
+      Tags:
+        - Key: Name
+          Value: !Join [ '-', [ alb, !Ref EnvironmentName ] ]
+  # Listener
+  ApplicationLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - TargetGroupArn:
+            Ref: ApplicationLoadBalancerTargetGroup
+          Type: forward
+      Certificates:
+        - CertificateArn: !FindInMap [ RegionMap, !Ref 'AWS::Region', CertificateManager ]
+      LoadBalancerArn:
+        Ref: ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+  # TargetGroup
+  ApplicationLoadBalancerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /index.html
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: 200
+      Name: !Join [ '-', [ target, !Ref EnvironmentName, a ] ]
+      Port: 80
+      Protocol: HTTP
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 300
+        - Key: stickiness.enabled
+          Value: false
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: 86400
+      Targets:
+        - Id:
+            Ref: EC2Instance
+          Port: 80
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Join [ '-', [ tg, !Ref EnvironmentName ] ]
+
+  ######################################
+  # EC2
+  ######################################
+  ElasticIPAddress:
+    Type: AWS::EC2::EIP
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [ RegionMap, !Ref 'AWS::Region', AMI ]
+      # インスタンスタイプ
+      InstanceType: !FindInMap [ RegionMap, !Ref 'AWS::Region', InstanceType ]
+      # シャットダウン時の動作
+      InstanceInitiatedShutdownBehavior: 'stop'
+      # キーペア
+      KeyName: !Ref KeyPair
+      # 詳細モニタリング設定
+      Monitoring: false
+      # テナンシー
+      Tenancy: 'default'
+      IamInstanceProfile: RoleName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: false
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref ApplicationSubnetSecurityGroup
+          SubnetId: !Ref ApplicationSubnetA
+      UserData:
+        Fn::Base64: !Sub |
+          #cloud-config
+          locale: ja_JP.UTF-8
+          #!/bin/bash -v
+          # yum update -y
+          # yum install httpd -y
+          # chkconfig httpd on
+          # service httpd restart
+          # yum install ncurses-term -y
+      # タグ
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ application, !Ref EnvironmentName ] ]
+  IPAssoc:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref EC2Instance
+      EIP: !Ref ElasticIPAddress
+
+  ######################################
+  # Datastore
+  ######################################
+  PostgreSQL:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Join [ '-', [ rcdb, !Ref EnvironmentName ] ]
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - Ref: DatastoreSecurityGroup
+      AllocatedStorage: !FindInMap [ StackConfig, RDS, AllocatedStorage ]
+      DBInstanceClass: !FindInMap [ StackConfig, RDS, InstanceType ]
+      DBSnapshotIdentifier: arn:aws:rds:ap-northeast-1:xxxxxxxxxxxx:snapshot:xxxx-xxxxxxxxxxxxx
+      MasterUserPassword: ************
+      DBParameterGroupName:
+      PubliclyAccessible: !FindInMap [ StackConfig, RDS, PubliclyAccessible ]
+      DBParameterGroupName: arameterGroupName
+      MultiAZ: !FindInMap [ StackConfig, RDS, MultiAZ ]
+      StorageEncrypted: !FindInMap [ StackConfig, RDS, StorageEncrypted ]
+  # datastore subnet group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    DependsOn:
+      - DatastoreSubnetA
+      - DatastoreSubnetB
+    Properties:
+      DBSubnetGroupDescription: datastore subnet group
+      SubnetIds:
+        - Ref: DatastoreSubnetA
+        - Ref: DatastoreSubnetB
+      Tags:
+        - Key: 'Name'
+          Value: !Join [ '-', [ db-subnetgroup, !Ref EnvironmentName ] ]
+
+######################################
+# Outputs Settings
+######################################
+Outputs:
+  WebsiteURL:
+    Description: 'URL for newly created Website.'
+    Value: !Join
+      - ''
+      - - 'https://'
+        - !Join [ '.', [ !Ref EnvironmentName, !FindInMap [ StackConfig, Domain, ValidationDomain ] ] ]
+  SSHCommand:
+    Description: 'SSH command for EC2Instance.'
+    Value: !Join
+      - ''
+      - - 'ssh -i '
+        - !Ref KeyPair
+        - '.pem '
+        - ec2-user@
+        - !GetAtt
+          - EC2Instance
+          - PublicIp
+  PsqlCommand:
+    Description: 'Psql command for RDS Instance.'
+    Value: !Join [ '', [ 'psql -U mastername dbname -h ', !GetAtt PostgreSQL.Endpoint.Address ] ]
+  EC2PublicAddress:
+    Description: 'Public Address of EC2.'
+    Value: !Ref ElasticIPAddress
+  EC2PrivateAddress:
+    Description: 'Private Address of EC2.'
+    Value: !GetAtt EC2Instance.PrivateIp
+  ApplicationLoadBalancerDNSRecord:
+    Description: 'ApplicationLoadBalancerDNSRecord for Route53 Settings.'
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+
