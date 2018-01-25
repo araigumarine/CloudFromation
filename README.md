@@ -1,2 +1,2 @@
 # CloudFromation
-AWS CloudFormation templates.
+for AWS CloudFormation templates.
