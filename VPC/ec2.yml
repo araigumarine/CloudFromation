@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS CloudFormation recipe for Basic Gyro Environment.
+
+######################################
+# Parameters Settings
+######################################
+Parameters:
+  VPC:
+    Description: Please input the VpcId
+    Type: String
+    Default: vpc-********
+  KeyPair:
+    Description: Choose the name of an existing EC2 KeyPair to enable SSH access to the instance.
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: can contain only ASCII characters.
+
+######################################
+# Conditions Settings
+######################################
+
+######################################
+# Mappings Settings
+######################################
+Mappings:
+  StackConfig:
+    EC2PrivateSubnet:
+      CIDR: 10.0.100.0/25
+    EC2:
+      InstanceType: t2.nano
+      ImageId: ami-********
+    SG:
+      SSH: 22
+
+######################################
+# Resources Settings
+######################################
+Resources:
+  EC2PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1a
+      CidrBlock: !FindInMap [ StackConfig, EC2PrivateSubnet, CIDR ]
+      Tags:
+        - Key: Name
+          Value: AP-SEG
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: AP-SG
+      VpcId: !Ref VPC
+      GroupDescription: SecurityGroup for EC2
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          SourceSecurityGroupId: sg-********
+          FromPort: !FindInMap [ StackConfig, SG, SSH ]
+          ToPort: !FindInMap [ StackConfig, SG, SSH ]
+      Tags:
+        - Key: Name
+          Value: AP-SG
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - InstanceSecurityGroup
+      - EC2PrivateSubnet
+    Properties:
+      ImageId: !FindInMap [ StackConfig, EC2, ImageId ]
+      InstanceType: !FindInMap [ StackConfig, EC2, InstanceType ]
+      KeyName: !Ref KeyPair
+      IamInstanceProfile: RoleName
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: false
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref InstanceSecurityGroup
+          SubnetId: !Ref EC2PrivateSubnet
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash -v
+          sudo yum update -y
+          sudo yum install httpd -y
+          sudo chkconfig httpd on
+          sudo service httpd restart
+          sudo yum install ncurses-term -y
+          sudo adduser user-name
+          sudo usermod -G wheel user-name
+          sudo mkdir /home/user-name/.ssh/
+      Tags:
+        - Key: Name
+          Value: ap-name
+

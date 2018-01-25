@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: AWS CloudFormation recipe for Basic Environment.
+
+######################################
+# Parameters Settings
+######################################
+Parameters:
+  VPC:
+    Description: Please input the VpcId
+    Type: String
+    Default: vpc-********
+
+######################################
+# Conditions Settings
+######################################
+
+######################################
+# Mappings Settings
+######################################
+Mappings:
+  StackConfig:
+    RDSPrivateSubnet:
+      CIDR: 10.0.105.0/25
+    SG:
+      PostgreSQL: 5432
+      Oracle: 1521
+      SSH: 22
+    RDS:
+      InstanceType: db.t2.micro
+      PreferredBackupWindow: 04:00-06:00
+      BackupRetentionPeriod: 30
+      AllocatedStorage: 20
+      PubliclyAccessible: false
+      MultiAZ: false
+      StorageEncrypted: false
+      AutoMinorVersionUpgrade: false
+    PostgreSQL:
+      Engine: postgres
+      EngineVersion: 9.5.4
+
+######################################
+# Resources Settings
+######################################
+Resources:
+  RDSPrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1a
+      CidrBlock: !FindInMap [ StackConfig, RDSPrivateSubnet, CIDR ]
+      Tags:
+        - Key: Name
+          Value: DB-SEG
+  PostgreSQLDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: DB-POSTGRESQL-SG
+      GroupDescription: SecurityGroup for PostgreSQL RDS
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          SourceSecurityGroupId: sg-********
+          FromPort: !FindInMap [ StackConfig, SG, PostgreSQL ]
+          ToPort: !FindInMap [ StackConfig, SG, PostgreSQL ]
+      Tags:
+        - Key: Name
+          Value: DB-POSTGRESQL-SG
+  PostgreSQL1:
+    Type: AWS::RDS::DBInstance
+    DependsOn:
+      - PostgreSQLDBSecurityGroup
+      - RDSPrivateSubnet
+    Properties:
+      DBInstanceIdentifier: identifier
+      DBName: dbname
+      DBSubnetGroupName: subnet-group-name
+      VPCSecurityGroups:
+        - Ref: PostgreSQLDBSecurityGroup
+      AllocatedStorage: !FindInMap [ StackConfig, RDS, AllocatedStorage ]
+      DBInstanceClass: !FindInMap [ StackConfig, RDS, InstanceType ]
+      Engine: !FindInMap [ StackConfig, PostgreSQL, Engine ]
+      EngineVersion: 9.5.2
+      MasterUsername: psqlrcdbmastera
+      MasterUserPassword: ************
+      PubliclyAccessible: !FindInMap [ StackConfig, RDS, PubliclyAccessible ]
+      DBParameterGroupName: parameter-group-name
+      MultiAZ: !FindInMap [ StackConfig, RDS, MultiAZ ]
+      StorageEncrypted: !FindInMap [ StackConfig, RDS, StorageEncrypted ]
+      BackupRetentionPeriod: !FindInMap [ StackConfig, RDS, BackupRetentionPeriod ]
+      PreferredBackupWindow: !FindInMap [ StackConfig, RDS, PreferredBackupWindow ]
+      AutoMinorVersionUpgrade: !FindInMap [ StackConfig, RDS, AutoMinorVersionUpgrade ]
+
